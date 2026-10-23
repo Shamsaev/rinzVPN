@@ -1,0 +1,11 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# ядра скачиваются скриптом scripts/fetch-cores.ps1
+src-tauri/cores/*
+!src-tauri/cores/.gitkeep
+
+.DS_Store
+*.log

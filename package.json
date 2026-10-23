@@ -1,0 +1,27 @@
+{
+  "name": "rinzvpn",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "tauri": "tauri",
+    "cores": "powershell -ExecutionPolicy Bypass -File scripts/fetch-cores.ps1"
+  },
+  "dependencies": {
+    "@fontsource-variable/manrope": "^5.2.5",
+    "@fontsource/unbounded": "^5.2.5",
+    "@tauri-apps/api": "^2.5.0",
+    "solid-js": "^1.9.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vite-plugin-solid": "^2.11.6",
+    "vitest": "^3.1.4"
+  }
+}
