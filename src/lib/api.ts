@@ -97,8 +97,8 @@ function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
 }
 
 export const api = {
-  connect: (mode: Mode, xrayConfig: string, singboxConfig: string | undefined, httpPort: number) =>
-    call<CoreStatus>("connect", { mode, xrayConfig, singboxConfig: singboxConfig ?? null, httpPort }),
+  connect: (mode: Mode, xrayConfig: string, singboxConfig: string | undefined, httpPort: number, verbose = false) =>
+    call<CoreStatus>("connect", { mode, xrayConfig, singboxConfig: singboxConfig ?? null, httpPort, verbose }),
   freePorts: (count: number) => call<number[]>("free_ports", { count }),
   urlTest: (config: string, ports: number[]) => call<(number | null)[]>("url_test", { config, ports }),
   disconnect: () => call<void>("disconnect"),

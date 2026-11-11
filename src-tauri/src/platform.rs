@@ -292,3 +292,49 @@ pub fn open_url(url: &str) -> Result<(), String> {
 pub fn open_url(_url: &str) -> Result<(), String> {
     Err("Доступно только в Windows".into())
 }
+
+// ---------------- мягкая остановка ----------------
+
+/// Посылает процессу Ctrl+C (как при закрытии консоли) и ждёт выхода; не вышел — убивает.
+/// sing-box по Ctrl+C корректно закрывается и удаляет свой TUN-адаптер.
+#[cfg(windows)]
+pub fn stop_gracefully(child: &mut std::process::Child, timeout: std::time::Duration) {
+    use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_C_EVENT};
+    unsafe {
+        // наше окно консоли не нужно, а сигнал не должен закрыть само приложение
+        SetConsoleCtrlHandler(None, 1);
+        FreeConsole();
+        if AttachConsole(child.id()) != 0 {
+            GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0);
+            FreeConsole();
+        }
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(not(windows))]
+pub fn stop_gracefully(child: &mut std::process::Child, timeout: std::time::Duration) {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    unsafe {
+        kill(child.id() as i32, 2);
+    }
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        if let Ok(Some(_)) = child.try_wait() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}

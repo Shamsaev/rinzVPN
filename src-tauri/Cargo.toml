@@ -1,6 +1,6 @@
 [package]
 name = "nebo"
-version = "0.3.1"
+version = "0.3.2"
 description = "Nebo — клиент для ключей VLESS / VMess / Trojan / Shadowsocks на базе Xray-core"
 authors = ["Shamsaev"]
 edition = "2021"
@@ -26,6 +26,7 @@ windows-sys = { version = "0.59", features = [
   "Win32_Security",
   "Win32_System_Threading",
   "Win32_System_JobObjects",
+  "Win32_System_Console",
   "Win32_Networking_WinInet",
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",

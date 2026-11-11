@@ -13,6 +13,40 @@ use tauri::{AppHandle, Emitter, Manager};
 const MAX_LOG_LINES: usize = 600;
 const PROXY_MARKER: &str = "proxy-marker.txt";
 
+/// Строки sing-box, которые в журнал не пишем. В подробном режиме оставляем
+/// «какая программа» и «куда пошло», иначе — только предупреждения и ошибки.
+fn is_noise(line: &str, verbose: bool) -> bool {
+    if line.contains("WARN") || line.contains("ERROR") || line.contains("FATAL") || line.contains("sing-box started") {
+        return false;
+    }
+    if verbose {
+        return !(line.contains("found process path") || line.contains("outbound connection") || line.contains("outbound packet connection"));
+    }
+    line.contains("INFO") || line.contains("DEBUG")
+}
+
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '\u{1b}' {
+            // ESC [ ... буква
+            if it.peek() == Some(&'[') {
+                it.next();
+                while let Some(&n) = it.peek() {
+                    it.next();
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Если в прошлый раз приложение упало с включённым системным прокси — выключаем его.
 pub fn cleanup_stale_proxy(app: &AppHandle) {
     let Ok(dir) = runtime_dir(app) else { return };
@@ -73,6 +107,8 @@ struct Running {
 
 pub struct CoreManager {
     running: Mutex<Running>,
+    /// подробный журнал sing-box: какая программа куда пошла
+    verbose: std::sync::atomic::AtomicBool,
     logs: Arc<Mutex<VecDeque<LogLine>>>,
     job: Option<KillOnCloseJob>,
 }
@@ -85,6 +121,7 @@ impl CoreManager {
     pub fn new() -> Self {
         Self {
             running: Mutex::new(Running::default()),
+            verbose: std::sync::atomic::AtomicBool::new(false),
             logs: Arc::new(Mutex::new(VecDeque::new())),
             job: KillOnCloseJob::new(),
         }
@@ -116,6 +153,7 @@ impl CoreManager {
     }
 
     fn pipe_output<R: Read + Send + 'static>(&self, app: &AppHandle, source: &'static str, stream: R) {
+        let verbose = self.verbose.load(std::sync::atomic::Ordering::Relaxed);
         let app = app.clone();
         let logs = self.logs.clone();
         std::thread::spawn(move || {
@@ -127,7 +165,7 @@ impl CoreManager {
                     Ok(0) | Err(_) => break,
                     Ok(_) => {
                         let line = String::from_utf8_lossy(&buf).trim_end().to_string();
-                        if !line.is_empty() {
+                        if !line.is_empty() && !(source == "sing-box" && is_noise(&line, verbose)) {
                             Self::push_log(&app, &logs, source, line);
                         }
                     }
@@ -170,6 +208,41 @@ impl CoreManager {
         Ok(())
     }
 
+    /// Ждёт строку «sing-box started» в журнале. Ошибку запуска возвращает текстом.
+    fn wait_singbox_started(&self, child: &mut Child, since: u64, timeout: Duration) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let (started, fatal) = {
+                let l = self.logs.lock().unwrap();
+                let fresh = l.iter().filter(|e| e.source == "sing-box" && e.ts >= since);
+                let mut started = false;
+                let mut fatal = None;
+                for e in fresh {
+                    if e.line.contains("sing-box started") {
+                        started = true;
+                    }
+                    if e.line.contains("FATAL") {
+                        fatal = Some(e.line.clone());
+                    }
+                }
+                (started, fatal)
+            };
+            if started {
+                return Ok(());
+            }
+            if let Ok(Some(_)) = child.try_wait() {
+                // даём потоку чтения дочитать вывод
+                std::thread::sleep(Duration::from_millis(200));
+                let tail = fatal.unwrap_or_else(|| self.last_log_lines("sing-box", 2));
+                return Err(format!("TUN не запустился: {}", strip_ansi(&tail)));
+            }
+            if Instant::now() > deadline {
+                return Err("TUN не запустился за 25 секунд. Подробности — в журнале.".into());
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    }
+
     fn last_log_lines(&self, source: &str, n: usize) -> String {
         let l = self.logs.lock().unwrap();
         let lines: Vec<_> = l.iter().filter(|e| e.source == source).rev().take(n).map(|e| e.line.clone()).collect();
@@ -183,8 +256,10 @@ impl CoreManager {
         xray_config: &str,
         singbox_config: Option<&str>,
         http_port: u16,
+        verbose: bool,
     ) -> Result<Status, String> {
         self.stop(app, None);
+        self.verbose.store(verbose, std::sync::atomic::Ordering::Relaxed);
 
         let cores = cores_dir(app)?;
         let xray_bin = cores.join(platform::exe_name("xray"));
@@ -231,22 +306,39 @@ impl CoreManager {
                     return Err(format!("Не найдено ядро sing-box: {}", sb_bin.display()));
                 }
                 let sb_cfg = runtime.join("singbox.json");
-                std::fs::write(&sb_cfg, singbox_config.ok_or("Нет конфига для TUN")?)
-                    .map_err(|e| format!("Не удалось записать конфиг: {e}"))?;
+                let mut config = singbox_config.ok_or("Нет конфига для TUN")?.to_string();
                 let sb_cfg_s = sb_cfg.to_string_lossy().to_string();
                 let runtime_s = runtime.to_string_lossy().to_string();
-                let mut sb = match self.spawn_core(app, "sing-box", &sb_bin, &["run", "-c", &sb_cfg_s, "-D", &runtime_s], &cores) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let _ = xray.kill();
-                        return Err(e);
+                let mut attempt = 0;
+                let sb = loop {
+                    attempt += 1;
+                    std::fs::write(&sb_cfg, &config).map_err(|e| format!("Не удалось записать конфиг: {e}"))?;
+                    let since = now_ms();
+                    let mut sb = match self.spawn_core(app, "sing-box", &sb_bin, &["run", "-c", &sb_cfg_s, "-D", &runtime_s], &cores) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let _ = xray.kill();
+                            return Err(e);
+                        }
+                    };
+                    match self.wait_singbox_started(&mut sb, since, Duration::from_secs(25)) {
+                        Ok(()) => break sb,
+                        Err(e) => {
+                            let _ = sb.kill();
+                            let _ = sb.wait();
+                            // адаптер от прошлого запуска ещё не удалён — пробуем под другим именем
+                            if attempt == 1 && (e.contains("create adapter") || e.contains("already exists")) {
+                                Self::push_log(app, &self.logs, "nebo", "Сетевой адаптер занят прошлым запуском, пробую ещё раз…".into());
+                                std::thread::sleep(Duration::from_millis(1500));
+                                let suffix = (now_ms() % 10000).to_string();
+                                config = config.replace("\"interface_name\": \"Nebo\"", &format!("\"interface_name\": \"Nebo {suffix}\""));
+                                continue;
+                            }
+                            let _ = xray.kill();
+                            return Err(e);
+                        }
                     }
                 };
-                if let Err(e) = Self::ensure_alive(&mut sb, "sing-box", Duration::from_millis(1500)) {
-                    let _ = xray.kill();
-                    let tail = self.last_log_lines("sing-box", 3);
-                    return Err(if tail.is_empty() { e } else { format!("{e}\n{tail}") });
-                }
                 singbox = Some(sb);
             }
             Mode::Proxy => match platform::enable_proxy(http_port) {
@@ -288,10 +380,13 @@ impl CoreManager {
             let mut r = self.running.lock().unwrap();
             was_running = r.xray.is_some();
             r.generation += 1;
-            for child in [r.singbox.take(), r.xray.take()].into_iter().flatten() {
-                let mut c = child;
-                let _ = c.kill();
-                let _ = c.wait();
+            // sing-box останавливаем мягко: так он сам удалит свой сетевой адаптер
+            if let Some(mut sb) = r.singbox.take() {
+                platform::stop_gracefully(&mut sb, Duration::from_secs(4));
+            }
+            if let Some(mut x) = r.xray.take() {
+                let _ = x.kill();
+                let _ = x.wait();
             }
             let ours = r.proxy_server.take();
             if let Some(before) = r.proxy_before.take() {

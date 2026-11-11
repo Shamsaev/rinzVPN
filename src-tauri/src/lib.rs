@@ -20,11 +20,12 @@ async fn connect(
     xray_config: String,
     singbox_config: Option<String>,
     http_port: u16,
+    verbose: Option<bool>,
 ) -> Result<Status, String> {
     // запуск ядер блокирующий (ждём проверку конфига) — уводим с UI-потока
     tauri::async_runtime::spawn_blocking(move || {
         let core = app.state::<CoreManager>();
-        core.start(&app, mode, &xray_config, singbox_config.as_deref(), http_port)
+        core.start(&app, mode, &xray_config, singbox_config.as_deref(), http_port, verbose.unwrap_or(false))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -172,7 +172,9 @@ function createAppStore() {
         null,
         2,
       );
-      const st = await api.connect(data.mode, xray, singbox, httpPort);
+      // в режимах с выбором программ показываем в журнале, какая программа куда пошла
+      const verbose = data.mode === "tun" && data.tun.scope !== "all" && data.tun.apps.length > 0;
+      const st = await api.connect(data.mode, xray, singbox, httpPort, verbose);
       batch(() => {
         setConn("on");
         setStartedAt(st.started_at ?? Date.now());

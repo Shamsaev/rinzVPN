@@ -121,7 +121,8 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
   }
 
   return {
-    log: { level: scope === "all" ? "warn" : "info", timestamp: true },
+    // info нужен, чтобы приложение видело «sing-box started»; лишнее отсекается при чтении журнала
+    log: { level: "info", timestamp: true },
     dns: {
       servers: [
         { type: "tcp", tag: "remote", server: opts.remoteDns ?? "1.1.1.1", detour: "proxy" },
