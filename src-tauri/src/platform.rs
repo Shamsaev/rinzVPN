@@ -171,7 +171,7 @@ pub fn relaunch_as_admin(_args: &str) -> Result<(), String> {
 
 // ---------------- Job Object ----------------
 
-/// Job Object с флагом KILL_ON_JOB_CLOSE: если rinzVPN упадёт или его убьют
+/// Job Object с флагом KILL_ON_JOB_CLOSE: если Nebo упадёт или его убьют
 /// через диспетчер задач, Windows сама завершит xray и sing-box,
 /// и TUN-интерфейс не останется висеть.
 #[cfg(windows)]

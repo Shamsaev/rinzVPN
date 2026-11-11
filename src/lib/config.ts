@@ -101,7 +101,7 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
       {
         type: "tun",
         tag: "tun-in",
-        interface_name: "rinzVPN",
+        interface_name: "Nebo",
         address: ["172.19.0.1/30"],
         mtu: 9000,
         auto_route: true,

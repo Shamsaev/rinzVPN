@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 use tokio::net::{lookup_host, TcpStream};
 
-const USER_AGENT: &str = concat!("rinzVPN/", env!("CARGO_PKG_VERSION"), " v2rayN/7.0");
+const USER_AGENT: &str = concat!("Nebo/", env!("CARGO_PKG_VERSION"), " v2rayN/7.0");
 
 async fn resolve(host: &str) -> Result<IpAddr, String> {
     if let Ok(ip) = host.parse::<IpAddr>() {

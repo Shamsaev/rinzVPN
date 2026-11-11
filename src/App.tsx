@@ -51,7 +51,14 @@ export default function App() {
 
       <header class="top">
         <div class="brand">
-          <span class="brand-mark" data-on={store.conn() === "on"} aria-hidden="true" />
+          <span class="brand-mark" data-on={store.conn() === "on"} aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14">
+              <path
+                fill="currentColor"
+                d="M7 18.5a4 4 0 0 1-.6-7.96 5.5 5.5 0 0 1 10.7-.9A4.25 4.25 0 0 1 17.25 18.5Z"
+              />
+            </svg>
+          </span>
           {APP_NAME}
         </div>
         <div class="top-actions">

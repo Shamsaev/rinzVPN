@@ -76,7 +76,7 @@ export function AdminDialog() {
       <div class="panel dialog" role="alertdialog" aria-labelledby="admin-title">
         <h3 id="admin-title">Нужны права администратора</h3>
         <p class="dialog-sub">
-          Режим TUN создаёт сетевой адаптер, а в Windows это можно только от имени администратора. rinzVPN перезапустится
+          Режим TUN создаёт сетевой адаптер, а в Windows это можно только от имени администратора. Nebo перезапустится
           и сразу подключится.
         </p>
         <div class="dialog-actions">

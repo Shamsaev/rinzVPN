@@ -46,7 +46,7 @@ interface Persisted {
 
 export type ConnState = "off" | "connecting" | "on" | "stopping";
 
-const STORAGE_KEY = "rinzvpn.v1";
+const STORAGE_KEY = "nebo.v1";
 const SUB_REFRESH_MS = 6 * 60 * 60 * 1000;
 
 function load(): Persisted {

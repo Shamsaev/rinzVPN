@@ -10,7 +10,7 @@ $SingboxVersion = "1.14.3"
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Cores = Join-Path $Root "src-tauri\cores"
-$Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("rinzvpn-cores-" + [guid]::NewGuid())
+$Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("nebo-cores-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $Cores, $Tmp | Out-Null
 
 try {

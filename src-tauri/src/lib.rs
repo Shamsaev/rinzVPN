@@ -79,9 +79,9 @@ fn set_tray_state(app: AppHandle, toggle: State<TrayToggle>, connected: bool, se
     }
     if let Some(tray) = app.tray_by_id("main") {
         let tip = match (connected, server) {
-            (true, Some(s)) => format!("rinzVPN — подключено\n{s}"),
-            (true, None) => "rinzVPN — подключено".to_string(),
-            _ => "rinzVPN — отключено".to_string(),
+            (true, Some(s)) => format!("Nebo — подключено\n{s}"),
+            (true, None) => "Nebo — подключено".to_string(),
+            _ => "Nebo — отключено".to_string(),
         };
         let _ = tray.set_tooltip(Some(tip));
     }
@@ -96,7 +96,7 @@ fn show_main(app: &AppHandle) {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    let show = MenuItem::with_id(app, "show", "Открыть rinzVPN", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Открыть Nebo", true, None::<&str>)?;
     let toggle = MenuItem::with_id(app, "toggle", "Подключить", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
@@ -104,7 +104,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     app.state::<TrayToggle>().0.lock().unwrap().replace(toggle);
 
     let mut builder = TrayIconBuilder::with_id("main")
-        .tooltip("rinzVPN — отключено")
+        .tooltip("Nebo — отключено")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -168,7 +168,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("не удалось запустить rinzVPN");
+        .expect("не удалось запустить Nebo");
 
     app.run(|app, event| {
         if let RunEvent::Exit = event {
