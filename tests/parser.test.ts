@@ -112,6 +112,63 @@ describe("ввод и подписки", () => {
   });
 });
 
+describe("JSON-подписка (Remnawave …/json)", () => {
+  const remna = [
+    {
+      remarks: "🇩🇪 Германия",
+      dns: { servers: ["1.1.1.1"] },
+      inbounds: [{ tag: "socks", port: 10808, protocol: "socks", listen: "127.0.0.1", settings: { udp: true } }],
+      outbounds: [
+        {
+          tag: "proxy",
+          protocol: "vless",
+          settings: { vnext: [{ address: "de.example.com", port: 443, users: [{ id: UUID, encryption: "none", flow: "xtls-rprx-vision" }] }] },
+          streamSettings: {
+            network: "tcp",
+            security: "reality",
+            realitySettings: { serverName: "www.google.com", fingerprint: "chrome", publicKey: "SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc", shortId: "ab" },
+            sockopt: { dialerProxy: "fragment" },
+          },
+        },
+        { tag: "fragment", protocol: "freedom", settings: { fragment: { packets: "tlshello", length: "100-200", interval: "10-20" } } },
+        { tag: "direct", protocol: "freedom" },
+        { tag: "block", protocol: "blackhole" },
+      ],
+      routing: { rules: [] },
+    },
+    {
+      remarks: "Норвегия (новый формат)",
+      outbounds: [{ tag: "proxy", protocol: "vless", settings: { address: "no.example.com", port: 8443, id: UUID, encryption: "none" }, streamSettings: { network: "xhttp", security: "tls", xhttpSettings: { path: "/x" } } }],
+    },
+    { remarks: "Hysteria", outbounds: [{ tag: "proxy", protocol: "hysteria", settings: {} }] },
+  ];
+
+  it("разбирает массив конфигов", () => {
+    const r = parseSubscriptionBody(JSON.stringify(remna));
+    expect(r.links).toHaveLength(2);
+    expect(r.errors).toHaveLength(1);
+    const de = r.links[0].parsed;
+    expect(de.name).toBe("🇩🇪 Германия");
+    expect(de.address).toBe("de.example.com");
+    expect(de.extraOutbounds?.map((o) => o.tag)).toEqual(["fragment"]);
+    // ссылка переживает сохранение и повторный разбор
+    expect(parseLink(r.links[0].link).outbound).toEqual(de.outbound);
+    const no = r.links[1].parsed;
+    expect([no.address, no.port]).toEqual(["no.example.com", 8443]);
+    expect(pinServerAddress(no.outbound, "10.0.0.2").settings.address).toBe("10.0.0.2");
+  });
+
+  it("выгрузка конфигов JSON-подписки", () => {
+    const out = process.env.CONFIG_OUT;
+    if (!out) return;
+    mkdirSync(out, { recursive: true });
+    for (const [i, l] of parseSubscriptionBody(JSON.stringify(remna)).links.entries()) {
+      const cfg = buildXrayConfig(l.parsed.outbound, { extraOutbounds: l.parsed.extraOutbounds });
+      writeFileSync(join(out, `xray-json-${i}.json`), JSON.stringify(cfg, null, 2));
+    }
+  });
+});
+
 describe("конфиги", () => {
   it("pinServerAddress сохраняет SNI", () => {
     const o = parseLink(SAMPLES.trojan).outbound;

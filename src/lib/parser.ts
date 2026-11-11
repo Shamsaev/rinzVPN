@@ -10,6 +10,8 @@ export interface ParsedLink {
   port: number;
   /** outbound в формате Xray (tag = "proxy") */
   outbound: Record<string, any>;
+  /** вспомогательные outbound из JSON-подписок (например, фрагментация через dialerProxy) */
+  extraOutbounds?: Record<string, any>[];
 }
 
 export class LinkError extends Error {}
@@ -390,6 +392,8 @@ export function parseLink(raw: string): ParsedLink {
   const link = raw.trim();
   const scheme = link.split("://")[0]?.toLowerCase();
   switch (scheme) {
+    case JSON_SCHEME:
+      return parseJsonLink(link);
     case "vless":
       return parseVless(link);
     case "vmess":
@@ -422,7 +426,7 @@ export interface InputResult {
   errors: { line: string; message: string }[];
 }
 
-const LINK_RE = /^(vless|vmess|trojan|ss|socks5?|hysteria2|hy2|tuic|wireguard|wg|happ):\/\//i;
+const LINK_RE = /^(xray-json|vless|vmess|trojan|ss|socks5?|hysteria2|hy2|tuic|wireguard|wg|happ):\/\//i;
 
 export function splitLines(text: string): string[] {
   return text
@@ -456,6 +460,7 @@ export function parseUserInput(text: string): InputResult {
 /** Тело ответа подписки: обычно base64 со списком ключей, иногда — просто список. */
 export function parseSubscriptionBody(body: string): InputResult {
   const trimmed = body.trim();
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) return parseJsonSubscription(trimmed);
   let text = trimmed;
   if (!trimmed.includes("://")) {
     const d = tryB64decode(trimmed);
@@ -499,4 +504,104 @@ export function parseProfileTitle(h: string | null | undefined): string | undefi
     return tryB64decode(h.slice(7)) ?? undefined;
   }
   return h;
+}
+
+// ---------- JSON-подписки (Remnawave / Marzban: …/json, формат v2ray-json) ----------
+// Панель отдаёт массив полных конфигов Xray. Из каждого берём outbound прокси
+// (и то, на что он ссылается через dialerProxy) и упаковываем во внутреннюю
+// псевдо-ссылку xray-json://, чтобы хранить сервер так же, как обычный ключ.
+
+const JSON_SCHEME = "xray-json";
+const SUPPORTED_PROTOCOLS: Record<string, Protocol> = {
+  vless: "vless",
+  vmess: "vmess",
+  trojan: "trojan",
+  shadowsocks: "shadowsocks",
+  socks: "socks",
+};
+const RESERVED_TAGS = new Set(["proxy", "direct", "block", "socks-in", "http-in"]);
+
+function b64encodeUtf8(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function serverOf(o: Record<string, any>): { host: string; port: number } {
+  const s = o.settings ?? {};
+  const t = s.vnext?.[0] ?? s.servers?.[0] ?? s;
+  const host = stripBrackets(String(t.address ?? ""));
+  if (!host) throw new LinkError("В конфиге нет адреса сервера");
+  return { host, port: parsePort(t.port) };
+}
+
+/** Выбирает из полного конфига Xray outbound прокси и его зависимости. */
+function extractFromXrayConfig(cfg: Record<string, any>): { name?: string; outbound: any; extra: any[] } {
+  const outbounds: any[] = Array.isArray(cfg.outbounds) ? cfg.outbounds : [];
+  const proxy =
+    outbounds.find((o) => o?.tag === "proxy" && SUPPORTED_PROTOCOLS[o.protocol]) ??
+    outbounds.find((o) => SUPPORTED_PROTOCOLS[o?.protocol]);
+  if (!proxy) {
+    const p = outbounds.find((o) => o?.tag === "proxy")?.protocol;
+    throw new LinkError(p ? `Протокол ${p} пока не поддерживается` : "В конфиге нет поддерживаемого сервера");
+  }
+  // собираем цепочку dialerProxy (например, outbound "fragment")
+  const byTag = new Map(outbounds.filter((o) => o?.tag).map((o) => [o.tag, o]));
+  const extra: any[] = [];
+  const seen = new Set<string>();
+  const walk = (o: any) => {
+    const tag = o?.streamSettings?.sockopt?.dialerProxy ?? o?.proxySettings?.tag;
+    if (!tag || seen.has(tag) || RESERVED_TAGS.has(tag)) return;
+    seen.add(tag);
+    const dep = byTag.get(tag);
+    if (dep) {
+      extra.push(dep);
+      walk(dep);
+    }
+  };
+  walk(proxy);
+  return { name: cfg.remarks, outbound: { ...proxy, tag: "proxy" }, extra };
+}
+
+function parseJsonLink(link: string): ParsedLink {
+  let data: { name?: string; outbound: any; extra?: any[] };
+  try {
+    data = JSON.parse(b64decode(link.slice(JSON_SCHEME.length + 3)));
+  } catch {
+    throw new LinkError("Сохранённый сервер повреждён — обновите подписку");
+  }
+  const protocol = SUPPORTED_PROTOCOLS[data.outbound?.protocol];
+  if (!protocol) throw new LinkError(`Протокол ${data.outbound?.protocol} пока не поддерживается`);
+  const { host, port } = serverOf(data.outbound);
+  return {
+    name: data.name || `${host}:${port}`,
+    protocol,
+    address: host,
+    port,
+    outbound: data.outbound,
+    extraOutbounds: data.extra?.length ? data.extra : undefined,
+  };
+}
+
+export function parseJsonSubscription(body: string): InputResult {
+  const res: InputResult = { links: [], subscriptions: [], errors: [] };
+  let json: any;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    res.errors.push({ line: body.slice(0, 40), message: "Подписка в формате JSON, но JSON повреждён" });
+    return res;
+  }
+  const configs: any[] = Array.isArray(json) ? json : [json];
+  configs.forEach((cfg, i) => {
+    try {
+      const { name, outbound, extra } = extractFromXrayConfig(cfg ?? {});
+      const link = `${JSON_SCHEME}://${b64encodeUtf8(JSON.stringify({ name, outbound, extra }))}`;
+      res.links.push({ link, parsed: parseJsonLink(link) });
+    } catch (e) {
+      res.errors.push({ line: cfg?.remarks ?? `#${i + 1}`, message: (e as Error).message });
+    }
+  });
+  return res;
 }

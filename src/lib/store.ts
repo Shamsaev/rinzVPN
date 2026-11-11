@@ -140,7 +140,7 @@ function createAppStore() {
         }
         singbox = JSON.stringify(buildSingboxConfig(), null, 2);
       }
-      const xray = JSON.stringify(buildXrayConfig(outbound), null, 2);
+      const xray = JSON.stringify(buildXrayConfig(outbound, { extraOutbounds: parsed.extraOutbounds }), null, 2);
       const st = await api.connect(data.mode, xray, singbox);
       batch(() => {
         setConn("on");

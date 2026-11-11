@@ -20,6 +20,8 @@ export interface XrayOptions {
   socksPort?: number;
   httpPort?: number;
   logLevel?: "debug" | "info" | "warning" | "error" | "none";
+  /** дополнительные outbound (из JSON-подписок) */
+  extraOutbounds?: Record<string, any>[];
 }
 
 export function buildXrayConfig(outbound: Record<string, any>, opts: XrayOptions = {}) {
@@ -48,6 +50,7 @@ export function buildXrayConfig(outbound: Record<string, any>, opts: XrayOptions
     ],
     outbounds: [
       outbound,
+      ...(opts.extraOutbounds ?? []),
       { tag: "direct", protocol: "freedom" },
       { tag: "block", protocol: "blackhole" },
     ],
@@ -70,6 +73,7 @@ export function pinServerAddress(outbound: Record<string, any>, ip: string): Rec
   const o = structuredClone(outbound);
   const s = o.settings ?? {};
   const targets: any[] = [...(s.vnext ?? []), ...(s.servers ?? [])];
+  if (!targets.length && s.address) targets.push(s); // упрощённый формат: address прямо в settings
   for (const t of targets) {
     const original = t.address;
     t.address = ip;
