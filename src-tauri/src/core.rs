@@ -11,6 +11,30 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_LOG_LINES: usize = 600;
+const PROXY_MARKER: &str = "proxy-marker.txt";
+
+/// Если в прошлый раз приложение упало с включённым системным прокси — выключаем его.
+pub fn cleanup_stale_proxy(app: &AppHandle) {
+    let Ok(dir) = runtime_dir(app) else { return };
+    let marker = dir.join(PROXY_MARKER);
+    if let Ok(ours) = std::fs::read_to_string(&marker) {
+        if let Ok(cur) = platform::read_proxy() {
+            if cur.enable == 1 && cur.server == ours.trim() {
+                let _ = platform::write_proxy(&ProxySnapshot { enable: 0, ..cur });
+            }
+        }
+        let _ = std::fs::remove_file(marker);
+    }
+}
+
+/// Свободные TCP-порты на 127.0.0.1 (берём у системы и сразу освобождаем).
+pub fn free_ports(n: usize) -> Result<Vec<u16>, String> {
+    let listeners: Vec<_> = (0..n)
+        .map(|_| std::net::TcpListener::bind("127.0.0.1:0"))
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Не удалось подобрать свободный порт: {e}"))?;
+    listeners.iter().map(|l| l.local_addr().map(|a| a.port()).map_err(|e| e.to_string())).collect()
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -40,6 +64,8 @@ struct Running {
     mode: Option<Mode>,
     started_at: Option<u64>,
     proxy_before: Option<ProxySnapshot>,
+    /// адрес, который мы прописали в системный прокси
+    proxy_server: Option<String>,
     /// растёт при каждом старте/стопе — сторожевой поток по нему понимает,
     /// что сессия, за которой он следил, уже закончилась
     generation: u64,
@@ -196,6 +222,7 @@ impl CoreManager {
         // 3. режим
         let mut singbox = None;
         let mut proxy_before = None;
+        let mut proxy_server = None;
         match mode {
             Mode::Tun => {
                 let sb_bin = cores.join(platform::exe_name("sing-box"));
@@ -223,7 +250,13 @@ impl CoreManager {
                 singbox = Some(sb);
             }
             Mode::Proxy => match platform::enable_proxy(http_port) {
-                Ok(before) => proxy_before = Some(before),
+                Ok(before) => {
+                    let ours = platform::our_proxy_server(http_port);
+                    // метка: если приложение упадёт, при следующем запуске выключим этот прокси
+                    let _ = std::fs::write(runtime.join(PROXY_MARKER), &ours);
+                    proxy_before = Some(before);
+                    proxy_server = Some(ours);
+                }
                 Err(e) => {
                     let _ = xray.kill();
                     return Err(format!("Не удалось включить системный прокси: {e}"));
@@ -239,6 +272,7 @@ impl CoreManager {
             r.mode = Some(mode);
             r.started_at = Some(now_ms());
             r.proxy_before = proxy_before;
+            r.proxy_server = proxy_server;
             r.generation
         };
         self.spawn_watchdog(app.clone(), generation);
@@ -259,14 +293,18 @@ impl CoreManager {
                 let _ = c.kill();
                 let _ = c.wait();
             }
+            let ours = r.proxy_server.take();
             if let Some(before) = r.proxy_before.take() {
                 // если до нас прокси был наш же (после падения) — просто выключаем
-                let restore = if before.server == platform::our_proxy_server(crate::HTTP_PORT) {
+                let restore = if Some(&before.server) == ours.as_ref() {
                     ProxySnapshot { enable: 0, ..before }
                 } else {
                     before
                 };
                 let _ = platform::write_proxy(&restore);
+                if let Ok(dir) = runtime_dir(app) {
+                    let _ = std::fs::remove_file(dir.join(PROXY_MARKER));
+                }
             }
             r.mode = None;
             r.started_at = None;
@@ -327,4 +365,29 @@ pub fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("runtime");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать папку {}: {e}", dir.display()))?;
     Ok(dir)
+}
+
+/// Запускает отдельный xray для проверки пинга (не трогает основное подключение).
+/// Возвращает процесс; вызывающий обязан его завершить.
+pub fn spawn_test_core(app: &AppHandle, config: &str) -> Result<Child, String> {
+    let cores = cores_dir(app)?;
+    let xray_bin = cores.join(platform::exe_name("xray"));
+    if !xray_bin.exists() {
+        return Err("Не найдено ядро Xray".into());
+    }
+    let cfg = runtime_dir(app)?.join("xray-test.json");
+    std::fs::write(&cfg, config).map_err(|e| format!("Не удалось записать конфиг: {e}"))?;
+    let mut cmd = Command::new(&xray_bin);
+    cmd.args(["run", "-c", &cfg.to_string_lossy()])
+        .current_dir(&cores)
+        .env("XRAY_LOCATION_ASSET", &cores)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    platform::hide_console(&mut cmd);
+    let child = cmd.spawn().map_err(|e| format!("Не удалось запустить Xray: {e}"))?;
+    if let Some(job) = &app.state::<CoreManager>().job {
+        job.assign(&child);
+    }
+    Ok(child)
 }

@@ -13,7 +13,7 @@ import {
   type Protocol,
   type SubscriptionInfo,
 } from "./parser";
-import { buildSingboxConfig, buildXrayConfig, pinServerAddress } from "./config";
+import { buildSingboxConfig, buildTestConfig, buildXrayConfig, pinServerAddress } from "./config";
 
 export interface Server {
   id: string;
@@ -93,6 +93,7 @@ function createAppStore() {
   const [pings, setPings] = createStore<Record<string, number | "err" | "…">>({});
   const [logs, setLogs] = createSignal<LogLine[]>([]);
   const [busySubs, setBusySubs] = createStore<Record<string, boolean>>({});
+  const [testing, setTesting] = createSignal(false);
 
   const persist = () => {
     try {
@@ -138,10 +139,16 @@ function createAppStore() {
         if (!isIp(parsed.address)) {
           outbound = pinServerAddress(outbound, await api.resolveHost(parsed.address));
         }
-        singbox = JSON.stringify(buildSingboxConfig(), null, 2);
       }
-      const xray = JSON.stringify(buildXrayConfig(outbound, { extraOutbounds: parsed.extraOutbounds }), null, 2);
-      const st = await api.connect(data.mode, xray, singbox);
+      // свободные порты: 10808 может быть занят другим клиентом (Happ, v2rayN)
+      const [socksPort, httpPort] = await api.freePorts(2);
+      if (data.mode === "tun") singbox = JSON.stringify(buildSingboxConfig({ socksPort }), null, 2);
+      const xray = JSON.stringify(
+        buildXrayConfig(outbound, { socksPort, httpPort, extraOutbounds: parsed.extraOutbounds }),
+        null,
+        2,
+      );
+      const st = await api.connect(data.mode, xray, singbox, httpPort);
       batch(() => {
         setConn("on");
         setStartedAt(st.started_at ?? Date.now());
@@ -297,22 +304,38 @@ function createAppStore() {
     persist();
   }
 
-  async function pingAll() {
-    const list = [...data.servers];
-    setPings(reconcile(Object.fromEntries(list.map((s) => [s.id, "…" as const]))));
-    let i = 0;
-    const worker = async () => {
-      while (i < list.length) {
-        const s = list[i++];
-        try {
-          setPings(s.id, await api.tcpPing(s.address, s.port));
-        } catch {
-          setPings(s.id, "err");
-        }
+  /** Настоящий пинг через сам сервер (запрос на generate_204). Без ids — все серверы. */
+  async function pingAll(ids?: string[]) {
+    if (!ids && testing()) return;
+    const list = ids ? data.servers.filter((s) => ids.includes(s.id)) : [...data.servers];
+    if (!list.length) return;
+    const items: { outbound: Record<string, any>; extraOutbounds?: Record<string, any>[] }[] = [];
+    const okIds: string[] = [];
+    if (!ids) setPings(reconcile({}));
+    for (const s of list) {
+      try {
+        const p = parseLink(s.link);
+        items.push({ outbound: p.outbound, extraOutbounds: p.extraOutbounds });
+        okIds.push(s.id);
+        setPings(s.id, "…");
+      } catch {
+        setPings(s.id, "err");
       }
-    };
-    await Promise.all(Array.from({ length: 8 }, worker));
+    }
+    if (!items.length) return;
+    if (!ids) setTesting(true);
+    try {
+      const ports = await api.freePorts(items.length);
+      const res = await api.urlTest(JSON.stringify(buildTestConfig(items, ports)), ports);
+      okIds.forEach((id, i) => setPings(id, res[i] ?? "err"));
+    } catch (e) {
+      okIds.forEach((id) => setPings(id, "err"));
+      setError(`Не удалось проверить пинг: ${errorText(e)}`);
+    } finally {
+      if (!ids) setTesting(false);
+    }
   }
+
 
   // ---------- старт приложения ----------
 
@@ -381,6 +404,7 @@ function createAppStore() {
     removeServer,
     removeSubscription,
     pingAll,
+    testing,
     init,
     relaunchAsAdmin: () => api.relaunchAsAdmin(true).catch((e) => setError(errorText(e))),
     inTauri,

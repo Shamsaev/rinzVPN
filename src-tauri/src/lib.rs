@@ -8,8 +8,6 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 
-pub const HTTP_PORT: u16 = 10809;
-
 /// Пункт меню трея «Подключить / Отключить» — меняем его текст по состоянию.
 struct TrayToggle(Mutex<Option<MenuItem<tauri::Wry>>>);
 
@@ -21,11 +19,12 @@ async fn connect(
     mode: Mode,
     xray_config: String,
     singbox_config: Option<String>,
+    http_port: u16,
 ) -> Result<Status, String> {
     // запуск ядер блокирующий (ждём проверку конфига) — уводим с UI-потока
     tauri::async_runtime::spawn_blocking(move || {
         let core = app.state::<CoreManager>();
-        core.start(&app, mode, &xray_config, singbox_config.as_deref(), HTTP_PORT)
+        core.start(&app, mode, &xray_config, singbox_config.as_deref(), http_port)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -134,9 +133,6 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // если в прошлый раз упали с включённым прокси — выключаем
-    platform::cleanup_stale_proxy(HTTP_PORT);
-
     let app = tauri::Builder::default()
         .manage(CoreManager::new())
         .manage(TrayToggle(Mutex::new(None)))
@@ -153,8 +149,12 @@ pub fn run() {
             net::tcp_ping,
             net::resolve_host,
             net::fetch_subscription,
+            net::free_ports,
+            net::url_test,
         ])
         .setup(|app| {
+            // если в прошлый раз упали с включённым прокси — выключаем
+            core::cleanup_stale_proxy(app.handle());
             build_tray(app)?;
             Ok(())
         })

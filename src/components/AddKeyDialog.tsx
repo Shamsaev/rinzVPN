@@ -37,7 +37,7 @@ export function AddKeyDialog(props: { onClose: () => void; initial?: string }) {
 
   return (
     <div class="overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
-      <form class="dialog" onSubmit={submit} onKeyDown={(e) => e.key === "Escape" && props.onClose()}>
+      <form class="panel dialog" onSubmit={submit} onKeyDown={(e) => e.key === "Escape" && props.onClose()}>
         <h3>Добавить ключ</h3>
         <p class="dialog-sub">Ключ сервера или ссылка на подписку. Можно несколько — каждый с новой строки.</p>
         <textarea
@@ -54,14 +54,14 @@ export function AddKeyDialog(props: { onClose: () => void; initial?: string }) {
           </ul>
         </Show>
         <div class="dialog-actions">
-          <button type="button" class="ghost-btn" onClick={pasteFromClipboard}>
+          <button type="button" class="btn" onClick={pasteFromClipboard}>
             Вставить из буфера
           </button>
           <span class="spacer" />
-          <button type="button" class="ghost-btn" onClick={props.onClose}>
+          <button type="button" class="btn" onClick={props.onClose}>
             Отмена
           </button>
-          <button type="submit" class="primary-btn" disabled={busy() || !text().trim()}>
+          <button type="submit" class="btn accent" disabled={busy() || !text().trim()}>
             {busy() ? "Добавляю…" : "Добавить"}
           </button>
         </div>
@@ -73,7 +73,7 @@ export function AddKeyDialog(props: { onClose: () => void; initial?: string }) {
 export function AdminDialog() {
   return (
     <div class="overlay">
-      <div class="dialog" role="alertdialog" aria-labelledby="admin-title">
+      <div class="panel dialog" role="alertdialog" aria-labelledby="admin-title">
         <h3 id="admin-title">Нужны права администратора</h3>
         <p class="dialog-sub">
           Режим TUN создаёт сетевой адаптер, а в Windows это можно только от имени администратора. rinzVPN перезапустится
@@ -81,7 +81,7 @@ export function AdminDialog() {
         </p>
         <div class="dialog-actions">
           <button
-            class="ghost-btn"
+            class="btn"
             onClick={() => {
               store.setNeedAdmin(false);
               store.setMode("proxy");
@@ -91,11 +91,11 @@ export function AdminDialog() {
             Подключить через прокси
           </button>
           <span class="spacer" />
-          <button class="ghost-btn" onClick={() => store.setNeedAdmin(false)}>
+          <button class="btn" onClick={() => store.setNeedAdmin(false)}>
             Отмена
           </button>
           <button
-            class="primary-btn"
+            class="btn accent"
             onClick={() => {
               store.setNeedAdmin(false);
               store.relaunchAsAdmin();

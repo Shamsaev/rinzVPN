@@ -3,6 +3,7 @@
 use serde::Serialize;
 use std::net::IpAddr;
 use std::time::{Duration, Instant};
+use tauri::AppHandle;
 use tokio::net::{lookup_host, TcpStream};
 
 const USER_AGENT: &str = concat!("rinzVPN/", env!("CARGO_PKG_VERSION"), " v2rayN/7.0");
@@ -49,6 +50,7 @@ pub struct SubscriptionResponse {
 #[tauri::command]
 pub async fn fetch_subscription(url: String) -> Result<SubscriptionResponse, String> {
     let client = reqwest::Client::builder()
+        .no_proxy()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(20))
         .build()
@@ -64,4 +66,67 @@ pub async fn fetch_subscription(url: String) -> Result<SubscriptionResponse, Str
     let update_interval = header("profile-update-interval");
     let body = resp.text().await.map_err(|e| e.to_string())?;
     Ok(SubscriptionResponse { body, userinfo, title, update_interval })
+}
+
+#[tauri::command]
+pub fn free_ports(count: usize) -> Result<Vec<u16>, String> {
+    crate::core::free_ports(count.clamp(1, 512))
+}
+
+const TEST_URL: &str = "https://www.gstatic.com/generate_204";
+
+async fn delay_via(port: u16) -> Option<u32> {
+    let proxy = reqwest::Proxy::all(format!("socks5h://127.0.0.1:{port}")).ok()?;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .proxy(proxy)
+        .timeout(Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let start = Instant::now();
+    let resp = client.get(TEST_URL).send().await.ok()?;
+    let ok = resp.status().as_u16() == 204 || resp.status().is_success();
+    ok.then(|| start.elapsed().as_millis() as u32)
+}
+
+/// Настоящий пинг: поднимаем отдельный xray, где у каждого сервера свой SOCKS-порт,
+/// и через каждый делаем запрос на generate_204. `None` — сервер не ответил.
+#[tauri::command]
+pub async fn url_test(app: AppHandle, config: String, ports: Vec<u16>) -> Result<Vec<Option<u32>>, String> {
+    let mut child = crate::core::spawn_test_core(&app, &config)?;
+
+    // ждём, пока xray начнёт слушать порты
+    let first = *ports.first().ok_or("Нет серверов для проверки")?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if TcpStream::connect(("127.0.0.1", first)).await.is_ok() {
+            break;
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            let mut err = String::new();
+            if let Some(mut e) = child.stderr.take() {
+                use std::io::Read;
+                let _ = e.read_to_string(&mut err);
+            }
+            let reason = err.lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("").to_string();
+            return Err(format!("Xray не запустился для проверки: {reason}"));
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            return Err("Xray не запустился для проверки".into());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    let mut set = tokio::task::JoinSet::new();
+    for (i, port) in ports.iter().copied().enumerate() {
+        set.spawn(async move { (i, delay_via(port).await) });
+    }
+    let mut results = vec![None; ports.len()];
+    while let Some(Ok((i, r))) = set.join_next().await {
+        results[i] = r;
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok(results)
 }

@@ -107,15 +107,6 @@ pub fn enable_proxy(http_port: u16) -> std::io::Result<ProxySnapshot> {
     Ok(before)
 }
 
-/// Если приложение в прошлый раз упало, прокси мог остаться включённым на наш порт.
-pub fn cleanup_stale_proxy(http_port: u16) {
-    if let Ok(cur) = read_proxy() {
-        if cur.enable == 1 && cur.server == our_proxy_server(http_port) {
-            let _ = write_proxy(&ProxySnapshot { enable: 0, ..cur });
-        }
-    }
-}
-
 // ---------------- права администратора ----------------
 
 #[cfg(windows)]

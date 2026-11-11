@@ -14,10 +14,10 @@
       {
         "label": "main",
         "title": "rinzVPN",
-        "width": 420,
-        "height": 740,
-        "minWidth": 380,
-        "minHeight": 560,
+        "width": 1000,
+        "height": 660,
+        "minWidth": 640,
+        "minHeight": 480,
         "resizable": true,
         "center": true
       }
@@ -28,7 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "category": "Utility",
     "shortDescription": "Клиент для VLESS / VMess / Trojan / Shadowsocks",
     "icon": [
@@ -37,11 +39,16 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "resources": ["cores/*"],
+    "resources": [
+      "cores/*"
+    ],
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Russian", "English"]
+        "languages": [
+          "Russian",
+          "English"
+        ]
       }
     }
   }

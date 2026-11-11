@@ -12,9 +12,9 @@
     "cores": "powershell -ExecutionPolicy Bypass -File scripts/fetch-cores.ps1"
   },
   "dependencies": {
-    "@fontsource-variable/manrope": "^5.2.5",
-    "@fontsource/unbounded": "^5.2.5",
+    "@fontsource-variable/onest": "^5.3.1",
     "@tauri-apps/api": "^2.5.0",
+    "country-flag-emoji-polyfill": "^0.1.10",
     "solid-js": "^1.9.5"
   },
   "devDependencies": {

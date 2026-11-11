@@ -58,6 +58,11 @@ async function mockInvoke(cmd: string, args?: Record<string, unknown>): Promise<
       return [];
     case "tcp_ping":
       return 40 + Math.round(Math.random() * 300);
+    case "free_ports":
+      return Array.from({ length: Number(args?.count ?? 1) }, (_, i) => 20000 + i);
+    case "url_test":
+      await new Promise((r) => setTimeout(r, 900));
+      return (args?.ports as number[]).map(() => (Math.random() < 0.15 ? null : 90 + Math.round(Math.random() * 500)));
     case "resolve_host":
       return "203.0.113.10";
     case "fetch_subscription":
@@ -73,8 +78,10 @@ function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
 }
 
 export const api = {
-  connect: (mode: Mode, xrayConfig: string, singboxConfig?: string) =>
-    call<CoreStatus>("connect", { mode, xrayConfig, singboxConfig: singboxConfig ?? null }),
+  connect: (mode: Mode, xrayConfig: string, singboxConfig: string | undefined, httpPort: number) =>
+    call<CoreStatus>("connect", { mode, xrayConfig, singboxConfig: singboxConfig ?? null, httpPort }),
+  freePorts: (count: number) => call<number[]>("free_ports", { count }),
+  urlTest: (config: string, ports: number[]) => call<(number | null)[]>("url_test", { config, ports }),
   disconnect: () => call<void>("disconnect"),
   status: () => call<CoreStatus>("status"),
   getLogs: () => call<LogLine[]>("get_logs"),

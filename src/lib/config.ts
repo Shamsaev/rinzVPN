@@ -126,3 +126,33 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
     },
   };
 }
+
+/**
+ * Конфиг для проверки пинга: у каждого сервера свой SOCKS-порт на 127.0.0.1,
+ * трафик с порта уходит в outbound этого сервера.
+ */
+export function buildTestConfig(
+  items: { outbound: Record<string, any>; extraOutbounds?: Record<string, any>[] }[],
+  ports: number[],
+) {
+  const inbounds: any[] = [];
+  const outbounds: any[] = [];
+  const rules: any[] = [];
+  items.forEach((item, i) => {
+    const prefix = `t${i}`;
+    const rename = (tag: string) => `${prefix}-${tag}`;
+    const fix = (o: Record<string, any>, tag: string) => {
+      const c = structuredClone(o);
+      c.tag = tag;
+      const sock = c.streamSettings?.sockopt;
+      if (sock?.dialerProxy) sock.dialerProxy = rename(sock.dialerProxy);
+      if (c.proxySettings?.tag) c.proxySettings.tag = rename(c.proxySettings.tag);
+      return c;
+    };
+    outbounds.push(fix(item.outbound, prefix));
+    for (const e of item.extraOutbounds ?? []) outbounds.push(fix(e, rename(e.tag)));
+    inbounds.push({ tag: `in${i}`, listen: "127.0.0.1", port: ports[i], protocol: "socks", settings: { udp: false } });
+    rules.push({ type: "field", inboundTag: [`in${i}`], outboundTag: prefix });
+  });
+  return { log: { loglevel: "none" }, inbounds, outbounds, routing: { rules } };
+}

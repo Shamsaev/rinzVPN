@@ -1,11 +1,12 @@
 import { For, Show, createMemo } from "solid-js";
 import { store, type Server, type Subscription } from "../lib/store";
+import { IconClose, IconGauge, IconPlus, IconRefresh } from "./Icons";
 
 const PROTO_LABEL: Record<string, string> = {
   vless: "VLESS",
   vmess: "VMess",
   trojan: "Trojan",
-  shadowsocks: "Shadowsocks",
+  shadowsocks: "SS",
   socks: "SOCKS",
 };
 
@@ -25,30 +26,37 @@ function subMeta(sub: Subscription): string {
   }
   if (i?.expire) {
     const d = new Date(i.expire * 1000);
-    const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
-    parts.push(days < 0 ? "срок истёк" : `до ${d.toLocaleDateString("ru-RU")}`);
+    parts.push(d.getTime() < Date.now() ? "срок истёк" : `до ${d.toLocaleDateString("ru-RU")}`);
   }
   return parts.join(", ");
 }
 
-function PingBadge(props: { id: string }) {
+function Ping(props: { id: string }) {
   const v = () => store.pings[props.id];
   const cls = () => {
     const p = v();
     if (p === undefined || p === "…") return "ping";
     if (p === "err") return "ping bad";
-    return p < 150 ? "ping good" : p < 400 ? "ping mid" : "ping bad";
+    return p < 300 ? "ping good" : p < 800 ? "ping mid" : "ping bad";
+  };
+  const text = () => {
+    const p = v();
+    if (p === undefined) return "—";
+    if (p === "…") return "…";
+    if (p === "err") return "нет ответа";
+    return `${p} мс`;
   };
   return (
-    <span class={cls()}>
-      {(() => {
-        const p = v();
-        if (p === undefined) return "";
-        if (p === "…") return "…";
-        if (p === "err") return "нет связи";
-        return `${p} мс`;
-      })()}
-    </span>
+    <button
+      class={cls()}
+      title="Проверить этот сервер"
+      onClick={(e) => {
+        e.stopPropagation();
+        store.pingAll([props.id]);
+      }}
+    >
+      {text()}
+    </button>
   );
 }
 
@@ -56,26 +64,33 @@ function Row(props: { server: Server; removable: boolean }) {
   const active = () => store.data.selectedId === props.server.id;
   const live = () => store.connectedId() === props.server.id && store.conn() === "on";
   return (
-    <li class="row" classList={{ active: active(), live: live(), removable: props.removable }}>
-      <button class="row-main" onClick={() => store.select(props.server.id)} aria-current={active()}>
-        <span class="radio" aria-hidden="true" />
-        <span class="row-text">
-          <span class="row-name">{props.server.name}</span>
-          <span class="row-proto">
-            {PROTO_LABEL[props.server.protocol]}
-            <Show when={props.server.detail}> {props.server.detail}</Show>
-          </span>
-        </span>
-        <PingBadge id={props.server.id} />
-      </button>
-      <Show when={props.removable}>
+    <li
+      class="row"
+      classList={{ active: active(), live: live() }}
+      onClick={() => store.select(props.server.id)}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), store.select(props.server.id))}
+      tabindex="0"
+      role="option"
+      aria-selected={active()}
+    >
+      <span class="radio" aria-hidden="true" />
+      <span class="row-name">{props.server.name}</span>
+      <span class="row-proto">
+        {PROTO_LABEL[props.server.protocol]}
+        <Show when={props.server.detail}> · {props.server.detail}</Show>
+      </span>
+      <Ping id={props.server.id} />
+      <Show when={props.removable} fallback={<span class="row-del-space" />}>
         <button
           class="icon-btn row-del"
           title="Удалить ключ"
           aria-label={`Удалить ${props.server.name}`}
-          onClick={() => store.removeServer(props.server.id)}
+          onClick={(e) => {
+            e.stopPropagation();
+            store.removeServer(props.server.id);
+          }}
         >
-          ×
+          <IconClose width={15} height={15} />
         </button>
       </Show>
     </li>
@@ -89,9 +104,9 @@ function SubGroup(props: { sub: Subscription }) {
     <section class="group">
       <header class="group-head">
         <div class="group-title">
-          <span>{props.sub.name}</span>
+          <h3>{props.sub.name}</h3>
           <Show when={subMeta(props.sub)}>
-            <small>{subMeta(props.sub)}</small>
+            <span>{subMeta(props.sub)}</span>
           </Show>
         </div>
         <button
@@ -107,7 +122,7 @@ function SubGroup(props: { sub: Subscription }) {
               .catch(() => {})
           }
         >
-          ⟳
+          <IconRefresh />
         </button>
         <button
           class="icon-btn"
@@ -117,13 +132,13 @@ function SubGroup(props: { sub: Subscription }) {
             if (confirm(`Удалить подписку «${props.sub.name}» и все её серверы?`)) store.removeSubscription(props.sub.id);
           }}
         >
-          ×
+          <IconClose />
         </button>
       </header>
       <Show when={props.sub.error}>
         <p class="group-error">{props.sub.error}</p>
       </Show>
-      <ul class="rows">
+      <ul class="rows" role="listbox">
         <For each={servers()}>{(s) => <Row server={s} removable={false} />}</For>
       </ul>
     </section>
@@ -137,28 +152,36 @@ export function ServerList(props: { onAdd: () => void }) {
   return (
     <div class="servers">
       <div class="servers-head">
-        <h2>Серверы</h2>
+        <h2>
+          Серверы
+          <Show when={store.data.servers.length}>
+            <span class="count">{store.data.servers.length}</span>
+          </Show>
+        </h2>
         <Show when={!empty()}>
-          <button class="ghost-btn" onClick={() => store.pingAll()}>
-            Проверить пинг
+          <button class="btn" onClick={() => store.pingAll()} disabled={store.testing()}>
+            <IconGauge classList={{ pulsing: store.testing() }} />
+            {store.testing() ? "Проверяю…" : "Проверить пинг"}
           </button>
         </Show>
-        <button class="add-btn" onClick={props.onAdd}>
-          + Ключ
+        <button class="btn accent" onClick={props.onAdd}>
+          <IconPlus />
+          Добавить
         </button>
       </div>
 
       <Show
         when={!empty()}
         fallback={
-          <div class="empty">
-            <p class="empty-title">Здесь появятся ваши серверы</p>
-            <p>Вставьте ключ vless://, vmess://, trojan://, ss:// или ссылку на подписку.</p>
-            <button class="primary-btn" onClick={props.onAdd}>
+          <div class="panel empty">
+            <p class="empty-title">Пока пусто</p>
+            <p class="muted">Вставьте ключ vless://, vmess://, trojan://, ss:// или ссылку на подписку.</p>
+            <button class="btn accent" onClick={props.onAdd}>
+              <IconPlus />
               Добавить ключ
             </button>
-            <p class="empty-kbd">
-              или скопируйте ключ и нажмите <kbd>Ctrl</kbd> + <kbd>V</kbd> прямо здесь
+            <p class="hint">
+              Или скопируйте ключ и нажмите <kbd>Ctrl</kbd> + <kbd>V</kbd> в любом месте окна
             </p>
           </div>
         }
@@ -167,10 +190,10 @@ export function ServerList(props: { onAdd: () => void }) {
           <section class="group">
             <header class="group-head">
               <div class="group-title">
-                <span>Мои ключи</span>
+                <h3>Мои ключи</h3>
               </div>
             </header>
-            <ul class="rows">
+            <ul class="rows" role="listbox">
               <For each={manual()}>{(s) => <Row server={s} removable />}</For>
             </ul>
           </section>
