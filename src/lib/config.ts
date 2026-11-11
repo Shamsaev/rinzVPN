@@ -101,22 +101,27 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
   // без выбранных программ «только выбранные» означало бы «ничего» — считаем это «весь трафик»
   const scope: TunScope = apps.length ? (opts.scope ?? "all") : "all";
 
+  // Windows не различает регистр в именах файлов, а sing-box — различает.
+  // Поэтому сравниваем по регулярке без учёта регистра: «Claude.exe» = «claude.exe».
+  const esc = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const appMatch = { process_path_regex: [`(?i)(^|[\\\\/])(${apps.map(esc).join("|")})$`] };
+
   const appRules: any[] = [];
   const dnsRules: any[] = [];
   let routeFinal = "proxy";
   let dnsFinal = "remote";
   if (scope === "only") {
-    appRules.push({ process_name: apps, outbound: "proxy" });
-    dnsRules.push({ process_name: apps, server: "remote" });
+    appRules.push({ ...appMatch, outbound: "proxy" });
+    dnsRules.push({ ...appMatch, server: "remote" });
     routeFinal = "direct";
     dnsFinal = "local";
   } else if (scope === "except") {
-    appRules.push({ process_name: apps, outbound: "direct" });
-    dnsRules.push({ process_name: apps, server: "local" });
+    appRules.push({ ...appMatch, outbound: "direct" });
+    dnsRules.push({ ...appMatch, server: "local" });
   }
 
   return {
-    log: { level: "warn", timestamp: true },
+    log: { level: scope === "all" ? "warn" : "info", timestamp: true },
     dns: {
       servers: [
         { type: "tcp", tag: "remote", server: opts.remoteDns ?? "1.1.1.1", detour: "proxy" },
@@ -131,7 +136,8 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
         type: "tun",
         tag: "tun-in",
         interface_name: "Nebo",
-        address: ["172.19.0.1/30"],
+        // IPv6 тоже заводим в туннель, иначе при IPv6 у провайдера часть соединений идёт мимо
+        address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
         mtu: 9000,
         auto_route: true,
         strict_route: true,
