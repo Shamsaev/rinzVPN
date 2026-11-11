@@ -1,5 +1,6 @@
 import { createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { store } from "../lib/store";
+import { days, fmtBytes, usage } from "../lib/format";
 
 const PROTO: Record<string, string> = {
   vless: "VLESS",
@@ -23,8 +24,10 @@ function fmtDuration(ms: number) {
   return `${h ? `${h}:` : ""}${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
+const SCOPE_TEXT = { all: "весь трафик", only: "выбранные программы", except: "все, кроме выбранных" } as const;
+
 /** Левая панель: состояние, выбранный сервер и одна кнопка. */
-export function ConnectionPanel() {
+export function ConnectionPanel(props: { onTunSettings: () => void }) {
   const [now, setNow] = createSignal(Date.now());
   const t = setInterval(() => setNow(Date.now()), 1000);
   onCleanup(() => clearInterval(t));
@@ -33,6 +36,18 @@ export function ConnectionPanel() {
   const server = store.selected;
   const busy = () => state() === "connecting" || state() === "stopping";
   const ping = () => (server() ? store.pings[server()!.id] : undefined);
+  const subLeft = createMemo(() => {
+    const s = server();
+    const sub = s?.subId ? store.data.subs.find((x) => x.id === s.subId) : undefined;
+    const u = usage(sub?.info);
+    if (!u) return null;
+    const parts: string[] = [];
+    if (u.left != null) parts.push(fmtBytes(u.left));
+    else if (u.hasTraffic) parts.push("безлимит");
+    if (u.expired) parts.push("срок истёк");
+    else if (u.daysLeft != null) parts.push(days(u.daysLeft));
+    return parts.length ? { text: parts.join(" · "), warn: u.warn } : null;
+  });
 
   const uptime = createMemo(() =>
     state() === "on" && store.startedAt() ? fmtDuration(now() - store.startedAt()!) : null,
@@ -72,8 +87,20 @@ export function ConnectionPanel() {
               </div>
               <div>
                 <dt>Режим</dt>
-                <dd>{store.data.mode === "tun" ? "Весь трафик (TUN)" : "Системный прокси"}</dd>
+                <dd>
+                  <Show when={store.data.mode === "tun"} fallback="Системный прокси">
+                    <button class="link" onClick={props.onTunSettings} title="Настроить TUN">
+                      TUN: {SCOPE_TEXT[store.data.tun.apps.length ? store.data.tun.scope : "all"]}
+                    </button>
+                  </Show>
+                </dd>
               </div>
+              <Show when={subLeft()}>
+                <div>
+                  <dt>Осталось</dt>
+                  <dd classList={{ "warn-text": subLeft()!.warn }}>{subLeft()!.text}</dd>
+                </div>
+              </Show>
               <Show when={typeof ping() === "number"}>
                 <div>
                   <dt>Задержка</dt>

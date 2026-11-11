@@ -222,3 +222,73 @@ impl KillOnCloseJob {
     }
     pub fn assign(&self, _child: &std::process::Child) {}
 }
+
+// ---------------- список программ и ссылки ----------------
+
+#[cfg(windows)]
+pub fn list_processes() -> Result<Vec<crate::net::AppInfo>, String> {
+    // PowerShell отдаёт путь, описание и наличие окна; процессы без доступного пути
+    // (системные службы) отбрасываем.
+    let script = r#"[Console]::OutputEncoding=[Text.Encoding]::UTF8
+Get-Process | Where-Object { $_.Path } | ForEach-Object {
+  [pscustomobject]@{ n=[IO.Path]::GetFileName($_.Path); t=$_.Description; p=$_.Path; w=($_.MainWindowHandle -ne 0) }
+} | ConvertTo-Json -Compress"#;
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+    hide_console(&mut cmd);
+    let out = cmd.output().map_err(|e| format!("Не удалось получить список программ: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let text = text.trim().trim_start_matches('\u{feff}');
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("Список программ не разобран: {e}"))?;
+    let items = match v {
+        serde_json::Value::Array(a) => a,
+        other => vec![other],
+    };
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    let mut res: Vec<crate::net::AppInfo> = Vec::new();
+    for it in items {
+        let Some(name) = it.get("n").and_then(|x| x.as_str()).map(String::from) else { continue };
+        let title = it.get("t").and_then(|x| x.as_str()).filter(|s| !s.trim().is_empty()).map(String::from);
+        let path = it.get("p").and_then(|x| x.as_str()).map(String::from);
+        let w = it.get("w").and_then(|x| x.as_bool()).unwrap_or(false);
+        let key = name.to_lowercase();
+        if let Some(&i) = seen.get(&key) {
+            if w {
+                res[i] = crate::net::AppInfo::new(name, title, path, true);
+            }
+            continue;
+        }
+        seen.insert(key, res.len());
+        res.push(crate::net::AppInfo::new(name, title, path, w));
+    }
+    Ok(res)
+}
+
+#[cfg(not(windows))]
+pub fn list_processes() -> Result<Vec<crate::net::AppInfo>, String> {
+    Ok(vec![])
+}
+
+#[cfg(windows)]
+pub fn open_url(url: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let verb = wide("open");
+    let file = wide(url);
+    let res = unsafe {
+        ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL)
+    };
+    if (res as isize) <= 32 {
+        return Err("Не удалось открыть ссылку".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn open_url(_url: &str) -> Result<(), String> {
+    Err("Доступно только в Windows".into())
+}

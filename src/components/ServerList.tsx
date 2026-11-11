@@ -1,6 +1,8 @@
 import { For, Show, createMemo } from "solid-js";
 import { store, type Server, type Subscription } from "../lib/store";
-import { IconClose, IconGauge, IconPlus, IconRefresh } from "./Icons";
+import { IconClose, IconGauge, IconLink, IconPlus, IconRefresh } from "./Icons";
+import { days, fmtAgo, fmtBytes, fmtDate, usage } from "../lib/format";
+import { api } from "../lib/api";
 
 const PROTO_LABEL: Record<string, string> = {
   vless: "VLESS",
@@ -9,27 +11,6 @@ const PROTO_LABEL: Record<string, string> = {
   shadowsocks: "SS",
   socks: "SOCKS",
 };
-
-function fmtBytes(n?: number) {
-  if (n == null) return "";
-  const gb = n / 1024 ** 3;
-  if (gb >= 1) return `${gb >= 100 ? gb.toFixed(0) : gb.toFixed(1)} ГБ`;
-  return `${(n / 1024 ** 2).toFixed(0)} МБ`;
-}
-
-function subMeta(sub: Subscription): string {
-  const parts: string[] = [];
-  const i = sub.info;
-  if (i && (i.upload != null || i.download != null)) {
-    const used = (i.upload ?? 0) + (i.download ?? 0);
-    parts.push(i.total ? `${fmtBytes(used)} из ${fmtBytes(i.total)}` : `${fmtBytes(used)} использовано`);
-  }
-  if (i?.expire) {
-    const d = new Date(i.expire * 1000);
-    parts.push(d.getTime() < Date.now() ? "срок истёк" : `до ${d.toLocaleDateString("ru-RU")}`);
-  }
-  return parts.join(", ");
-}
 
 function Ping(props: { id: string }) {
   const v = () => store.pings[props.id];
@@ -97,18 +78,72 @@ function Row(props: { server: Server; removable: boolean }) {
   );
 }
 
+function SubInfo(props: { sub: Subscription }) {
+  const u = createMemo(() => usage(props.sub.info));
+  return (
+    <div class="sub-info">
+      <Show when={props.sub.announce}>
+        <p class="announce">{props.sub.announce}</p>
+      </Show>
+      <Show
+        when={u()}
+        fallback={<p class="muted small">Провайдер не передаёт данные о трафике и сроке действия.</p>}
+      >
+        {(x) => (
+          <>
+            <Show when={x().hasTraffic}>
+              <div class="meter" classList={{ warn: (x().ratio ?? 0) >= 0.9 }}>
+                <div class="meter-fill" style={{ width: `${Math.max(2, (x().ratio ?? 0) * 100)}%` }} />
+              </div>
+              <div class="sub-line">
+                <span>
+                  Использовано <b>{fmtBytes(x().used)}</b>
+                  {x().total ? ` из ${fmtBytes(x().total!)}` : ""}
+                </span>
+                <span>{x().left != null ? <>Осталось <b>{fmtBytes(x().left!)}</b></> : <b>Безлимит</b>}</span>
+              </div>
+            </Show>
+            <div class="sub-line" classList={{ warn: x().warn, bad: x().expired }}>
+              <span>
+                {x().expireAt
+                  ? x().expired
+                    ? `Срок истёк ${fmtDate(x().expireAt!)}`
+                    : `Действует до ${fmtDate(x().expireAt!)}`
+                  : "Бессрочно"}
+              </span>
+              <Show when={x().daysLeft != null && !x().expired}>
+                <span>Ещё {days(x().daysLeft!)}</span>
+              </Show>
+            </div>
+          </>
+        )}
+      </Show>
+      <p class="sub-updated">Обновлено {fmtAgo(props.sub.updatedAt)}</p>
+    </div>
+  );
+}
+
 function SubGroup(props: { sub: Subscription }) {
   const servers = createMemo(() => store.data.servers.filter((s) => s.subId === props.sub.id));
   const busy = () => store.busySubs[props.sub.id];
+  const open = (url: string) => api.openUrl(url).catch((e) => store.setError(String(e)));
   return (
     <section class="group">
       <header class="group-head">
         <div class="group-title">
           <h3>{props.sub.name}</h3>
-          <Show when={subMeta(props.sub)}>
-            <span>{subMeta(props.sub)}</span>
-          </Show>
         </div>
+        <Show when={props.sub.webPageUrl}>
+          <button class="btn small" onClick={() => open(props.sub.webPageUrl!)}>
+            <IconLink width={14} height={14} />
+            Сайт
+          </button>
+        </Show>
+        <Show when={props.sub.supportUrl}>
+          <button class="btn small" onClick={() => open(props.sub.supportUrl!)}>
+            Поддержка
+          </button>
+        </Show>
         <button
           class="icon-btn"
           classList={{ spinning: busy() }}
@@ -135,6 +170,7 @@ function SubGroup(props: { sub: Subscription }) {
           <IconClose />
         </button>
       </header>
+      <SubInfo sub={props.sub} />
       <Show when={props.sub.error}>
         <p class="group-error">{props.sub.error}</p>
       </Show>

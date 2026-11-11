@@ -151,6 +151,8 @@ pub fn run() {
             net::fetch_subscription,
             net::free_ports,
             net::url_test,
+            net::list_apps,
+            net::open_url,
         ])
         .setup(|app| {
             // если в прошлый раз упали с включённым прокси — выключаем

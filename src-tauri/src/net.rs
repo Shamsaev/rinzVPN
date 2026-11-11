@@ -44,6 +44,9 @@ pub struct SubscriptionResponse {
     userinfo: Option<String>,
     title: Option<String>,
     update_interval: Option<String>,
+    support_url: Option<String>,
+    web_page_url: Option<String>,
+    announce: Option<String>,
 }
 
 /// Подписку качаем из Rust, а не из webview — так не мешает CORS.
@@ -64,8 +67,11 @@ pub async fn fetch_subscription(url: String) -> Result<SubscriptionResponse, Str
     let userinfo = header("subscription-userinfo");
     let title = header("profile-title");
     let update_interval = header("profile-update-interval");
+    let support_url = header("support-url");
+    let web_page_url = header("profile-web-page-url");
+    let announce = header("announce");
     let body = resp.text().await.map_err(|e| e.to_string())?;
-    Ok(SubscriptionResponse { body, userinfo, title, update_interval })
+    Ok(SubscriptionResponse { body, userinfo, title, update_interval, support_url, web_page_url, announce })
 }
 
 #[tauri::command]
@@ -129,4 +135,36 @@ pub async fn url_test(app: AppHandle, config: String, ports: Vec<u16>) -> Result
     let _ = child.kill();
     let _ = child.wait();
     Ok(results)
+}
+
+#[derive(Serialize)]
+pub struct AppInfo {
+    /// имя exe-файла, например "Discord.exe" — по нему и маршрутизируем
+    name: String,
+    title: Option<String>,
+    path: Option<String>,
+    has_window: bool,
+}
+
+/// Запущенные программы пользователя (у которых виден путь к exe).
+#[tauri::command]
+pub async fn list_apps() -> Result<Vec<AppInfo>, String> {
+    tauri::async_runtime::spawn_blocking(crate::platform::list_processes)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("tg://")) {
+        return Err("Можно открывать только ссылки http(s) и tg://".into());
+    }
+    crate::platform::open_url(&url)
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+impl AppInfo {
+    pub fn new(name: String, title: Option<String>, path: Option<String>, has_window: bool) -> Self {
+        Self { name, title, path, has_window }
+    }
 }

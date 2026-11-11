@@ -23,6 +23,16 @@ export interface SubscriptionResponse {
   userinfo: string | null;
   title: string | null;
   update_interval: string | null;
+  support_url: string | null;
+  web_page_url: string | null;
+  announce: string | null;
+}
+
+export interface AppInfo {
+  name: string;
+  title: string | null;
+  path: string | null;
+  has_window: boolean;
 }
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -65,6 +75,15 @@ async function mockInvoke(cmd: string, args?: Record<string, unknown>): Promise<
       return (args?.ports as number[]).map(() => (Math.random() < 0.15 ? null : 90 + Math.round(Math.random() * 500)));
     case "resolve_host":
       return "203.0.113.10";
+    case "list_apps":
+      return [
+        { name: "Discord.exe", title: "Discord", path: "C:\\Users\\me\\AppData\\Local\\Discord\\app-1.0.9188\\Discord.exe", has_window: true },
+        { name: "Telegram.exe", title: "Telegram Desktop", path: "C:\\Users\\me\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe", has_window: true },
+        { name: "chrome.exe", title: "Google Chrome", path: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", has_window: true },
+        { name: "steam.exe", title: "Steam", path: "C:\\Program Files (x86)\\Steam\\steam.exe", has_window: false },
+      ];
+    case "open_url":
+      return null;
     case "fetch_subscription":
       throw "В браузерном превью подписки не загружаются";
     default:
@@ -93,6 +112,8 @@ export const api = {
     call<void>("set_tray_state", { connected, server: server ?? null }),
   tcpPing: (host: string, port: number) => call<number>("tcp_ping", { host, port }),
   resolveHost: (host: string) => call<string>("resolve_host", { host }),
+  listApps: () => call<AppInfo[]>("list_apps"),
+  openUrl: (url: string) => call<void>("open_url", { url }),
   fetchSubscription: (url: string) => call<SubscriptionResponse>("fetch_subscription", { url }),
 
   onLog: (cb: (l: LogLine) => void) => on<LogLine>("core-log", cb),

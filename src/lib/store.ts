@@ -13,7 +13,7 @@ import {
   type Protocol,
   type SubscriptionInfo,
 } from "./parser";
-import { buildSingboxConfig, buildTestConfig, buildXrayConfig, pinServerAddress } from "./config";
+import { buildSingboxConfig, buildTestConfig, buildXrayConfig, pinServerAddress, type TunScope } from "./config";
 
 export interface Server {
   id: string;
@@ -35,6 +35,22 @@ export interface Subscription {
   info?: SubscriptionInfo;
   updatedAt: number;
   error?: string;
+  supportUrl?: string;
+  webPageUrl?: string;
+  announce?: string;
+  /** как часто обновлять, часы (заголовок profile-update-interval) */
+  refreshHours?: number;
+}
+
+export interface TunApp {
+  /** имя exe-файла: по нему и маршрутизируем, поэтому обновления программы не мешают */
+  name: string;
+  title?: string;
+}
+
+export interface TunSettings {
+  scope: TunScope;
+  apps: TunApp[];
 }
 
 interface Persisted {
@@ -42,21 +58,23 @@ interface Persisted {
   subs: Subscription[];
   selectedId?: string;
   mode: Mode;
+  tun: TunSettings;
 }
 
 export type ConnState = "off" | "connecting" | "on" | "stopping";
 
 const STORAGE_KEY = "nebo.v1";
 const SUB_REFRESH_MS = 6 * 60 * 60 * 1000;
+const refreshMs = (s: Subscription) => (s.refreshHours ? s.refreshHours * 3600 * 1000 : SUB_REFRESH_MS);
 
 function load(): Persisted {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return { servers: [], subs: [], mode: "proxy", ...JSON.parse(raw) };
+    if (raw) return { servers: [], subs: [], mode: "proxy", tun: { scope: "all", apps: [] }, ...JSON.parse(raw) };
   } catch {
     /* повреждённое хранилище — начинаем с нуля */
   }
-  return { servers: [], subs: [], mode: "proxy" };
+  return { servers: [], subs: [], mode: "proxy", tun: { scope: "all", apps: [] } };
 }
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -99,7 +117,13 @@ function createAppStore() {
     try {
       localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({ servers: data.servers, subs: data.subs, selectedId: data.selectedId, mode: data.mode }),
+        JSON.stringify({
+          servers: data.servers,
+          subs: data.subs,
+          selectedId: data.selectedId,
+          mode: data.mode,
+          tun: data.tun,
+        }),
       );
     } catch {
       /* нет места или хранилище недоступно */
@@ -142,7 +166,7 @@ function createAppStore() {
       }
       // свободные порты: 10808 может быть занят другим клиентом (Happ, v2rayN)
       const [socksPort, httpPort] = await api.freePorts(2);
-      if (data.mode === "tun") singbox = JSON.stringify(buildSingboxConfig({ socksPort }), null, 2);
+      if (data.mode === "tun") singbox = JSON.stringify(buildSingboxConfig({ socksPort, scope: data.tun.scope, apps: data.tun.apps.map((a) => a.name) }), null, 2);
       const xray = JSON.stringify(
         buildXrayConfig(outbound, { socksPort, httpPort, extraOutbounds: parsed.extraOutbounds }),
         null,
@@ -204,6 +228,13 @@ function createAppStore() {
     setData("mode", mode);
     persist();
     reconnectIfOn();
+  }
+
+  /** Сохраняет настройки TUN; если сейчас подключены в TUN — переподключаемся. */
+  function setTun(next: TunSettings) {
+    setData("tun", reconcile(next));
+    persist();
+    if (data.mode === "tun") reconnectIfOn();
   }
 
   // ---------- серверы и подписки ----------
@@ -272,6 +303,10 @@ function createAppStore() {
           info: parseUserInfoHeader(resp.userinfo),
           updatedAt: Date.now(),
           error: undefined,
+          supportUrl: resp.support_url || undefined,
+          webPageUrl: resp.web_page_url || undefined,
+          announce: parseProfileTitle(resp.announce) || undefined,
+          refreshHours: Number(resp.update_interval) > 0 ? Number(resp.update_interval) : undefined,
         });
         if (selectedLink) {
           const same = servers.find((s) => s.link === selectedLink);
@@ -370,8 +405,14 @@ function createAppStore() {
 
     // подписки обновляем в фоне, если давно не обновлялись
     for (const sub of data.subs) {
-      if (Date.now() - sub.updatedAt > SUB_REFRESH_MS) refreshSubscription(sub.id).catch(() => {});
+      if (Date.now() - sub.updatedAt > refreshMs(sub)) refreshSubscription(sub.id).catch(() => {});
     }
+    // и раз в 10 минут проверяем, не пора ли обновить снова
+    setInterval(() => {
+      for (const sub of data.subs) {
+        if (!busySubs[sub.id] && Date.now() - sub.updatedAt > refreshMs(sub)) refreshSubscription(sub.id).catch(() => {});
+      }
+    }, 10 * 60 * 1000);
     if (data.servers.length) pingAll();
   }
 
@@ -405,6 +446,7 @@ function createAppStore() {
     removeSubscription,
     pingAll,
     testing,
+    setTun,
     init,
     relaunchAsAdmin: () => api.relaunchAsAdmin(true).catch((e) => setError(errorText(e))),
     inTauri,

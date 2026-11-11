@@ -1,6 +1,6 @@
 [package]
 name = "nebo"
-version = "0.2.0"
+version = "0.3.0"
 description = "Nebo — клиент для ключей VLESS / VMess / Trojan / Shadowsocks на базе Xray-core"
 authors = ["Shamsaev"]
 edition = "2021"

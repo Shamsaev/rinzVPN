@@ -7,15 +7,16 @@ import { ConnectionPanel } from "./components/ConnectionPanel";
 import { ServerList } from "./components/ServerList";
 import { AddKeyDialog, AdminDialog } from "./components/AddKeyDialog";
 import { LogPanel } from "./components/LogPanel";
-import { IconAuto, IconLog, IconMoon, IconSun } from "./components/Icons";
+import { IconApps, IconLog, IconMoon, IconSun } from "./components/Icons";
+import { TunDialog } from "./components/TunDialog";
 
 const KEYISH = /(vless|vmess|trojan|ss|socks5?|hy2|hysteria2|happ):\/\/|https?:\/\//i;
 
-const THEME_LABEL = { system: "Тема: как в системе", light: "Тема: светлая", dark: "Тема: тёмная" } as const;
 
 export default function App() {
   const [adding, setAdding] = createSignal<false | { initial?: string }>(false);
   const [logsOpen, setLogsOpen] = createSignal(false);
+  const [tunOpen, setTunOpen] = createSignal(false);
 
   onMount(() => {
     store.init();
@@ -76,8 +77,16 @@ export default function App() {
               </button>
             ))}
           </div>
-          <button class="icon-btn" title={THEME_LABEL[theme.choice()]} aria-label={THEME_LABEL[theme.choice()]} onClick={theme.cycle}>
-            {theme.choice() === "light" ? <IconSun /> : theme.choice() === "dark" ? <IconMoon /> : <IconAuto />}
+          <button class="icon-btn" title="Настройки TUN: какие программы идут через сервер" aria-label="Настройки TUN" onClick={() => setTunOpen(true)}>
+            <IconApps />
+          </button>
+          <button
+            class="icon-btn"
+            title={theme.value() === "dark" ? "Светлая тема" : "Тёмная тема"}
+            aria-label={theme.value() === "dark" ? "Включить светлую тему" : "Включить тёмную тему"}
+            onClick={theme.toggle}
+          >
+            {theme.value() === "dark" ? <IconSun /> : <IconMoon />}
           </button>
           <button
             class="icon-btn"
@@ -94,7 +103,7 @@ export default function App() {
 
       <div class="layout">
         <div class="side">
-          <ConnectionPanel />
+          <ConnectionPanel onTunSettings={() => setTunOpen(true)} />
           <Show when={store.error()}>
             <div class="panel alert" role="alert">
               <p>{store.error()}</p>
@@ -126,6 +135,9 @@ export default function App() {
 
       <Show when={adding()}>
         {(a) => <AddKeyDialog initial={a().initial} onClose={() => setAdding(false)} />}
+      </Show>
+      <Show when={tunOpen()}>
+        <TunDialog onClose={() => setTunOpen(false)} />
       </Show>
       <Show when={store.needAdmin()}>
         <AdminDialog />

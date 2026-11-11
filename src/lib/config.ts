@@ -83,18 +83,47 @@ export function pinServerAddress(outbound: Record<string, any>, ip: string): Rec
   return o;
 }
 
+/** Какие программы идут через туннель в режиме TUN. */
+export type TunScope = "all" | "only" | "except";
+
 export interface SingboxOptions {
   socksPort?: number;
   remoteDns?: string;
+  /** all — весь трафик; only — только apps; except — все, кроме apps */
+  scope?: TunScope;
+  /** имена exe-файлов, например "Discord.exe" — переживают обновления программ */
+  apps?: string[];
 }
 
 export function buildSingboxConfig(opts: SingboxOptions = {}) {
   const socksPort = opts.socksPort ?? SOCKS_PORT;
+  const apps = [...new Set((opts.apps ?? []).filter(Boolean))];
+  // без выбранных программ «только выбранные» означало бы «ничего» — считаем это «весь трафик»
+  const scope: TunScope = apps.length ? (opts.scope ?? "all") : "all";
+
+  const appRules: any[] = [];
+  const dnsRules: any[] = [];
+  let routeFinal = "proxy";
+  let dnsFinal = "remote";
+  if (scope === "only") {
+    appRules.push({ process_name: apps, outbound: "proxy" });
+    dnsRules.push({ process_name: apps, server: "remote" });
+    routeFinal = "direct";
+    dnsFinal = "local";
+  } else if (scope === "except") {
+    appRules.push({ process_name: apps, outbound: "direct" });
+    dnsRules.push({ process_name: apps, server: "local" });
+  }
+
   return {
     log: { level: "warn", timestamp: true },
     dns: {
-      servers: [{ type: "tcp", tag: "remote", server: opts.remoteDns ?? "1.1.1.1", detour: "proxy" }],
-      final: "remote",
+      servers: [
+        { type: "tcp", tag: "remote", server: opts.remoteDns ?? "1.1.1.1", detour: "proxy" },
+        { type: "local", tag: "local" },
+      ],
+      rules: dnsRules,
+      final: dnsFinal,
       strategy: "ipv4_only",
     },
     inbounds: [
@@ -115,14 +144,16 @@ export function buildSingboxConfig(opts: SingboxOptions = {}) {
     ],
     route: {
       auto_detect_interface: true,
+      default_domain_resolver: "local",
       rules: [
         { action: "sniff" },
         { protocol: "dns", action: "hijack-dns" },
         // само ядро xray ходит к серверу напрямую, иначе получится петля
         { process_name: ["xray.exe", "xray"], outbound: "direct" },
         { ip_is_private: true, outbound: "direct" },
+        ...appRules,
       ],
-      final: "proxy",
+      final: routeFinal,
     },
   };
 }

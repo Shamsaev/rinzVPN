@@ -1,37 +1,35 @@
-// Тема оформления: системная, светлая или тёмная. Выбор хранится локально.
+// Тема: светлая или тёмная. При первом запуске берётся тема Windows,
+// дальше — то, что выбрал пользователь (одна кнопка, один клик).
 import { createRoot, createSignal } from "solid-js";
 
-export type ThemeChoice = "system" | "light" | "dark";
+export type Theme = "light" | "dark";
 const KEY = "app.theme";
 
-function read(): ThemeChoice {
+function initial(): Theme {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === "light" || v === "dark" || v === "system") return v;
+    if (v === "light" || v === "dark") return v;
   } catch {
     /* хранилище недоступно */
   }
-  return "system";
-}
-
-function apply(choice: ThemeChoice) {
-  const root = document.documentElement;
-  if (choice === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", choice);
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export const theme = createRoot(() => {
-  const [choice, setChoice] = createSignal<ThemeChoice>(read());
-  apply(choice());
-  const set = (c: ThemeChoice) => {
-    setChoice(c);
-    apply(c);
-    try {
-      localStorage.setItem(KEY, c);
-    } catch {
-      /* не страшно */
-    }
+  const [value, setValue] = createSignal<Theme>(initial());
+  const apply = (t: Theme) => document.documentElement.setAttribute("data-theme", t);
+  apply(value());
+  return {
+    value,
+    toggle() {
+      const next: Theme = value() === "dark" ? "light" : "dark";
+      setValue(next);
+      apply(next);
+      try {
+        localStorage.setItem(KEY, next);
+      } catch {
+        /* не страшно */
+      }
+    },
   };
-  const order: ThemeChoice[] = ["system", "light", "dark"];
-  return { choice, set, cycle: () => set(order[(order.indexOf(choice()) + 1) % order.length]) };
 });

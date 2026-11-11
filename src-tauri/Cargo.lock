@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "foreign-types-shared"
-version = "0.2.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
@@ -1990,7 +1990,7 @@ dependencies = [
 
 [[package]]
 name = "nebo"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",

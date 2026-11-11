@@ -28,13 +28,6 @@ export const IconMoon = (p: P) => (
   </svg>
 );
 
-export const IconAuto = (p: P) => (
-  <svg {...base} {...p}>
-    <circle cx="12" cy="12" r="8.5" />
-    <path d="M12 3.5v17a8.5 8.5 0 0 0 0-17Z" fill="currentColor" stroke="none" />
-  </svg>
-);
-
 export const IconLog = (p: P) => (
   <svg {...base} {...p}>
     <path d="M4 6h16M4 12h16M4 18h10" />
@@ -64,5 +57,20 @@ export const IconGauge = (p: P) => (
 export const IconClose = (p: P) => (
   <svg {...base} {...p}>
     <path d="M6 6l12 12M18 6 6 18" />
+  </svg>
+);
+
+export const IconLink = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+  </svg>
+);
+
+export const IconApps = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.6" />
+    <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6" />
+    <path d="M16.75 14v5.5M14 16.75h5.5" />
   </svg>
 );
